@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🐰 토끼 길건너기</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: linear-gradient(180deg, #87CEEB 0%, #E0F6FF 100%);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Comic Sans MS', 'Chalkboard SE', 'Noto Sans KR', cursive, sans-serif;
+      overflow: hidden;
+    }
+    .game-container {
+      position: relative;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.15), 0 0 0 4px #fff, 0 0 0 8px #FFD1DC;
+      border-radius: 16px;
+      overflow: hidden;
+    }
+    canvas { display: block; }
+    .ui {
+      position: absolute;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 24px;
+      z-index: 10;
+      pointer-events: none;
+    }
+    .score-box, .best-box {
+      background: rgba(255,255,255,0.95);
+      padding: 8px 20px;
+      border-radius: 24px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 800;
+      font-size: 1.1rem;
+      color: #333;
+    }
+    .score-box { border: 3px solid #FF6B9D; }
+    .best-box { border: 3px solid #FFD93D; }
+    .label { opacity: 0.6; font-size: 0.85rem; }
+    .value { color: #FF6B9D; font-size: 1.3rem; }
+    .best-box .value { color: #E8A817; }
+    .message {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(255,255,255,0.98);
+      padding: 40px 50px;
+      border-radius: 24px;
+      text-align: center;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+      display: none;
+      z-index: 20;
+      border: 4px solid #FF6B9D;
+    }
+    .message.show { display: block; animation: popIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); }
+    @keyframes popIn {
+      from { transform: translate(-50%, -50%) scale(0.7); opacity: 0; }
+      to { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+    }
+    .message h2 { font-size: 2rem; margin-bottom: 12px; color: #333; }
+    .message p { color: #666; margin-bottom: 20px; font-size: 1.1rem; }
+    .btn {
+      background: linear-gradient(135deg, #FF6B9D, #FF8FAB);
+      border: none;
+      color: white;
+      padding: 14px 36px;
+      font-size: 1.1rem;
+      font-weight: 700;
+      border-radius: 30px;
+      cursor: pointer;
+      box-shadow: 0 6px 20px rgba(255,107,157,0.4);
+      transition: transform 0.15s, box-shadow 0.15s;
+      font-family: inherit;
+    }
+    .btn:hover { transform: translateY(-2px); box-shadow: 0 10px 28px rgba(255,107,157,0.5); }
+    .btn:active { transform: translateY(1px); }
+    .controls-hint {
+      position: absolute;
+      bottom: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #666;
+      font-size: 0.85rem;
+      display: flex;
+      gap: 16px;
+      opacity: 0.7;
+    }
+    .key {
+      background: white;
+      padding: 4px 10px;
+      border-radius: 8px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+      font-weight: 700;
+    }
+    .grass-decoration {
+      position: absolute;
+      bottom: -2px;
+      left: 0;
+      right: 0;
+      height: 30px;
+      background: linear-gradient(180deg, #7FD669, #5BB344);
+      border-radius: 0 0 16px 16px;
+      z-index: -1;
+    }
+  </style>
+</head>
+<body>
+  <div class="game-container">
+    <canvas id="game" width="480" height="640"></canvas>
+    <div class="ui">
+      <div class="score-box">
+        <span class="label">점수</span>
+        <span class="value" id="score">0</span>
+      </div>
+      <div class="best-box">
+        <span class="label">최고</span>
+        <span class="value" id="best">0</span>
+      </div>
+    </div>
+    <div class="message" id="message">
+      <h2 id="msg-title">게임 오버!</h2>
+      <p id="msg-text">자동차에 부딪혔어요 😢</p>
+      <button class="btn" id="restart">다시 시작</button>
+    </div>
+    <div class="controls-hint">
+      <span><span class="key">↑</span><span class="key">↓</span><span class="key">←</span><span class="key">→</span> 이동</span>
+      <span><span class="key">Space</span> 다시시작</span>
+    </div>
+    <div class="grass-decoration"></div>
+  </div>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+
+const scoreEl = document.getElementById('score');
+const bestEl = document.getElementById('best');
+const msg = document.getElementById('message');
+const msgTitle = document.getElementById('msg-title');
+const msgText = document.getElementById('msg-text');
+const restartBtn = document.getElementById('restart');
+
+let best = parseInt(localStorage.getItem('rabbitCrossBest') || '0');
+bestEl.textContent = best;
+
+// Game constants
+const GRID = 40;
+const ROWS = H / GRID; // 16
+const COLS = W / GRID; // 12
+const LANE_HEIGHT = GRID;
+
+// Road rows: rows 2-13 (leaving top/bottom safe zones)
+const ROAD_START = 2;
+const ROAD_END = 13;
+const ROAD_ROWS = ROAD_END - ROAD_START + 1; // 12 lanes
+
+// Rest area (safe lane in the middle of road)
+const REST_AREA_ROW = 7; // Middle-ish lane where no cars drive
+
+// Colors - cute palette
+const COLORS = {
+  sky: ['#87CEEB', '#A8D8EA', '#B8E0F0'],
+  grass: ['#7FD669', '#5BB344', '#4EC95E'],
+  restArea: '#5BB344', // Grass-like green for rest area
+  road: '#3D3D3D',
+  roadLine: '#FFD93D',
+  sidewalk: '#E8E8E8',
+  rabbitBody: '#FFF0F5',
+  rabbitEar: '#FFB6C1',
+  rabbitEarInner: '#FF6B9D',
+  rabbitEye: '#2D2D2D',
+  rabbitBlush: '#FFB6C1',
+  rabbitNose: '#FF6B9D',
+  carBody: ['#FF6B6B', '#4ECDC4', '#FFD93D', '#6BCB77', '#FF9F1C', '#A8D8EA', '#C7CEEA'],
+  carWindow: '#87CEEB',
+  carLight: '#FFD93D',
+  carLightRed: '#FF6B6B',
+  treeTrunk: '#8B6914',
+  treeLeaf: ['#4E9F3D', '#5BB344', '#3D8B3D'],
+  flower: ['#FF6B9D', '#FF8FAB', '#FFD93D', '#6BCB77', '#A8D8EA'],
+  cloud: 'rgba(255,255,255,0.9)'
+};
+
+// Game state
+let rabbit = { x: 5, y: 15, targetX: 5, targetY: 15, hopping: 0, hopDir: 0 };
+let cars = [];
+let score = 0;
+let highScoreThisRun = 0;
+let gameOver = false;
+let won = false;
+let frame = 0;
+let clouds = [];
+let flowers = [];
+let trees = [];
+let particles = [];
+let screenShake = 0;
+
+// Initialize decorations
+function initDecorations() {
+  clouds = [];
+  for (let i = 0; i < 6; i++) {
+    clouds.push({
+      x: Math.random() * W,
+      y: Math.random() * (ROAD_START * GRID) * 0.8,
+      speed: 0.2 + Math.random() * 0.3,
+      size: 40 + Math.random() * 40,
+      parts: Array.from({length: 3 + Math.floor(Math.random()*3)}, () => ({
+        ox: (Math.random()-0.5)*0.8,
+        oy: (Math.random()-0.5)*0.4,
+        r: 0.3 + Math.random()*0.4
+      }))
+    });
+  }
+  flowers = [];
+  for (let i = 0; i < 20; i++) {
+    const row = Math.random() > 0.5 ? 15 : 0;
+    flowers.push({
+      x: (Math.random() * (COLS - 1) + 0.5) * GRID,
+      y: row * GRID + GRID/2,
+      type: Math.floor(Math.random() * COLORS.flower.length),
+      scale: 0.8 + Math.random() * 0.4,
+      sway: Math.random() * Math.PI * 2
+    });
+  }
+  trees = [];
+  for (let i = 0; i < 8; i++) {
+    const side = Math.random() > 0.5 ? -1 : COLS;
+    const row = 1 + Math.floor(Math.random() * (ROAD_START - 1));
+    trees.push({
+      x: (side + (Math.random()-0.5)*0.5) * GRID,
+      y: row * GRID + GRID/2,
+      scale: 0.7 + Math.random() * 0.5,
+      leafColor: COLORS.treeLeaf[Math.floor(Math.random()*COLORS.treeLeaf.length)]
+    });
+  }
+}
+initDecorations();
+
+// Car class
+class Car {
+  constructor(row, dir) {
+    this.row = row;
+    this.dir = dir; // 1 = right, -1 = left
+    this.speed = 2 + Math.random() * 3;
+    this.length = 1.5 + Math.random() * 1.5; // in grid units
+    this.color = COLORS.carBody[Math.floor(Math.random() * COLORS.carBody.length)];
+    this.x = dir === 1 ? -this.length : COLS;
+    this.y = row * GRID + GRID/2;
+    this.wobble = Math.random() * Math.PI * 2;
+    this.type = Math.floor(Math.random() * 4); // 0=sedan, 1=truck, 2=van, 3=sports
+  }
+  update() {
+    this.x += this.dir * this.speed * 0.03;
+    this.wobble += 0.1;
+    // Check collision with rabbit
+    const rabbitPx = rabbit.x * GRID + GRID/2;
+    const rabbitPy = rabbit.y * GRID + GRID/2;
+    const carLeft = (this.x - this.length/2) * GRID;
+    const carRight = (this.x + this.length/2) * GRID;
+    const carTop = this.y - GRID/2 * 0.7;
+    const carBottom = this.y + GRID/2 * 0.7;
+    if (rabbitPx > carLeft && rabbitPx < carRight && rabbitPy > carTop && rabbitPy < carBottom) {
+      gameOver = true;
+      screenShake = 15;
+      createParticles(rabbitPx, rabbitPy, '#FF6B6B', 20);
+    }
+  }
+  draw() {
+    const px = this.x * GRID;
+    const py = this.y;
+    const w = this.length * GRID;
+    const h = GRID * 0.7;
+    const bounce = Math.sin(this.wobble) * 1.5;
+    
+    ctx.save();
+    ctx.translate(px, py + bounce);
+    
+    // Car body
+    const r = 8;
+    ctx.fillStyle = this.color;
+    ctx.beginPath();
+    ctx.roundRect(-w/2, -h/2, w, h, r);
+    ctx.fill();
+    
+    // Windows
+    ctx.fillStyle = COLORS.carWindow;
+    const winW = w * 0.6 / (this.type === 1 ? 3 : 2);
+    const winH = h * 0.5;
+    const winStart = -w/2 + w * 0.15;
+    if (this.type === 1) { // Truck - cab only
+      ctx.fillRect(-w/2 + 8, -h/2 + 4, w * 0.35, winH);
+    } else if (this.type === 3) { // Sports - low
+      ctx.fillRect(winStart, -h/2 + 3, w * 0.7, winH * 0.7);
+    } else {
+      for (let i = 0; i < (this.type === 2 ? 3 : 2); i++) {
+        ctx.fillRect(winStart + i * (winW + w*0.05), -h/2 + 4, winW, winH);
+      }
+    }
+    
+    // Lights
+    const front = this.dir === 1 ? w/2 : -w/2;
+    const lightColor = this.dir === 1 ? COLORS.carLight : COLORS.carLightRed;
+    ctx.fillStyle = lightColor;
+    ctx.beginPath();
+    ctx.arc(front, -h/3, 4, 0, Math.PI*2);
+    ctx.arc(front, h/3, 4, 0, Math.PI*2);
+    ctx.fill();
+    
+    // Wheels
+    ctx.fillStyle = '#1a1a1a';
+    const wheelY = h/2 - 2;
+    const wheelX = w/2 * 0.7;
+    [-wheelX, wheelX].forEach(wx => {
+      ctx.beginPath();
+      ctx.ellipse(wx, wheelY, 8, 5, 0, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#333';
+      ctx.beginPath();
+      ctx.ellipse(wx, wheelY, 4, 3, 0, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#1a1a1a';
+    });
+    
+    // Type-specific details
+    if (this.type === 1) { // Truck bed
+      ctx.fillStyle = this.color;
+      ctx.fillRect(-w/2 + w*0.4, -h/2, w*0.55, h);
+    }
+    
+    ctx.restore();
+  }
+  offScreen() {
+    return this.dir === 1 ? this.x > COLS + this.length : this.x < -this.length;
+  }
+}
+
+function spawnCars() {
+  // Ensure each lane has at least some cars (except rest area)
+  for (let row = ROAD_START; row <= ROAD_END; row++) {
+    if (row === REST_AREA_ROW) continue; // Skip rest area - no cars here!
+    const carsInLane = cars.filter(c => c.row === row).length;
+    if (carsInLane < 2 && Math.random() < 0.02) {
+      const dir = Math.random() > 0.5 ? 1 : -1;
+      cars.push(new Car(row, dir));
+    }
+  }
+}
+
+function createParticles(x, y, color, count) {
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 2 + Math.random() * 5;
+    particles.push({
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - 2,
+      life: 1,
+      color,
+      size: 4 + Math.random() * 6
+    });
+  }
+}
+
+function updateParticles() {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.2; // gravity
+    p.life -= 0.02;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+
+function drawParticles() {
+  particles.forEach(p => {
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI*2);
+    ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+}
+
+// Rabbit drawing
+function drawRabbit() {
+  const px = rabbit.x * GRID + GRID/2;
+  const py = rabbit.y * GRID + GRID/2;
+  const hopOffset = rabbit.hopping > 0 ? -Math.sin((1 - rabbit.hopping) * Math.PI) * 12 : 0;
+  const squish = rabbit.hopping > 0 ? 1 - (1 - rabbit.hopping) * 0.3 : 1;
+  const lean = rabbit.hopDir === 1 ? -5 : rabbit.hopDir === -1 ? 5 : 0;
+  
+  ctx.save();
+  ctx.translate(px + lean, py + hopOffset);
+  ctx.scale(1, squish);
+  
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.1)';
+  ctx.beginPath();
+  ctx.ellipse(0, GRID/2 * squish, 18, 6, 0, 0, Math.PI*2);
+  ctx.fill();
+  
+  // Body
+  ctx.fillStyle = COLORS.rabbitBody;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 20, 18, 0, 0, Math.PI*2);
+  ctx.fill();
+  
+  // Ears
+  const earH = 35;
+  [-1, 1].forEach(side => {
+    const earX = side * 14;
+    // Ear base
+    ctx.fillStyle = COLORS.rabbitBody;
+    ctx.beginPath();
+    ctx.ellipse(earX, -18, 10, earH, side * -0.2, 0, Math.PI*2);
+    ctx.fill();
+    // Ear inner
+    ctx.fillStyle = COLORS.rabbitEarInner;
+    ctx.beginPath();
+    ctx.ellipse(earX, -18, 5, earH * 0.7, side * -0.2, 0, Math.PI*2);
+    ctx.fill();
+  });
+  
+  // Face
+  // Eyes
+  const eyeY = -4;
+  [-1, 1].forEach(side => {
+    const eyeX = side * 8;
+    // White
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.ellipse(eyeX, eyeY, 7, 9, 0, 0, Math.PI*2);
+    ctx.fill();
+    // Pupil
+    ctx.fillStyle = COLORS.rabbitEye;
+    ctx.beginPath();
+    ctx.arc(eyeX + 1, eyeY, 3.5, 0, Math.PI*2);
+    ctx.fill();
+    // Highlight
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(eyeX + 2.5, eyeY - 2, 1.5, 0, Math.PI*2);
+    ctx.fill();
+  });
+  
+  // Blush
+  ctx.fillStyle = COLORS.rabbitBlush;
+  [-1, 1].forEach(side => {
+    ctx.beginPath();
+    ctx.arc(side * 18, 4, 6, 0, Math.PI*2);
+    ctx.fill();
+  });
+  
+  // Nose
+  ctx.fillStyle = COLORS.rabbitNose;
+  ctx.beginPath();
+  ctx.arc(0, 4, 3, 0, Math.PI*2);
+  ctx.fill();
+  
+  // Mouth
+  ctx.strokeStyle = COLORS.rabbitNose;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-3, 8);
+  ctx.quadraticCurveTo(0, 10, 3, 8);
+  ctx.stroke();
+  
+  // Front paws
+  ctx.fillStyle = COLORS.rabbitBody;
+  [-1, 1].forEach(side => {
+    ctx.beginPath();
+    ctx.ellipse(side * 14, 16, 7, 5, 0, 0, Math.PI*2);
+    ctx.fill();
+    // Paw pads
+    ctx.fillStyle = COLORS.rabbitEarInner;
+    ctx.beginPath();
+    ctx.arc(side * 14, 17, 2, 0, Math.PI*2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(side * 14 - side * 4, 18, 1.5, 0, Math.PI*2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(side * 14 + side * 4, 18, 1.5, 0, Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle = COLORS.rabbitBody;
+  });
+  
+  ctx.restore();
+}
+
+// Background drawing
+function drawBackground() {
+  // Sky gradient
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#87CEEB');
+  grad.addColorStop(0.5, '#A8D8EA');
+  grad.addColorStop(1, '#E0F6FF');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+  
+  // Clouds
+  clouds.forEach(c => {
+    c.x -= c.speed;
+    if (c.x + c.size < 0) c.x = W + c.size;
+    ctx.fillStyle = COLORS.cloud;
+    c.parts.forEach(p => {
+      ctx.beginPath();
+      ctx.arc(c.x + p.ox * c.size, c.y + p.oy * c.size, c.size * p.r, 0, Math.PI*2);
+      ctx.fill();
+    });
+  });
+  
+  // Trees (top)
+  trees.filter(t => t.y < ROAD_START * GRID).forEach(t => drawTree(t));
+  
+  // Top grass
+  ctx.fillStyle = COLORS.grass[0];
+  ctx.fillRect(0, 0, W, ROAD_START * GRID);
+  // Grass texture
+  ctx.fillStyle = COLORS.grass[1];
+  for (let x = 0; x < W; x += 20) {
+    for (let y = 0; y < ROAD_START * GRID; y += 20) {
+      if ((x + y) % 40 === 0) {
+        ctx.fillRect(x, y, 2, 2);
+      }
+    }
+  }
+  
+  // Flowers top
+  flowers.filter(f => f.y < ROAD_START * GRID).forEach(f => drawFlower(f));
+  
+  // Sidewalks
+  ctx.fillStyle = COLORS.sidewalk;
+  ctx.fillRect(0, ROAD_START * GRID, W, GRID);
+  ctx.fillRect(0, (ROAD_END + 1) * GRID, W, GRID);
+  
+  // Road
+  ctx.fillStyle = COLORS.road;
+  ctx.fillRect(0, (ROAD_START + 1) * GRID, W, (ROAD_END - ROAD_START) * GRID);
+  
+  // Rest area (safe lane - grass color)
+  ctx.fillStyle = COLORS.restArea;
+  ctx.fillRect(0, REST_AREA_ROW * GRID, W, GRID);
+  // Rest area decoration - little grass tufts
+  ctx.fillStyle = COLORS.grass[2];
+  for (let x = 10; x < W; x += 30) {
+    ctx.beginPath();
+    ctx.arc(x, REST_AREA_ROW * GRID + GRID/2, 3, 0, Math.PI*2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + 15, REST_AREA_ROW * GRID + GRID/2 - 5, 2, 0, Math.PI*2);
+    ctx.fill();
+  }
+  
+  // Road lines
+  ctx.strokeStyle = COLORS.roadLine;
+  ctx.lineWidth = 3;
+  ctx.setLineDash([30, 20]);
+  for (let row = ROAD_START + 1; row <= ROAD_END; row++) {
+    if (row === REST_AREA_ROW) continue; // No road lines on rest area
+    const y = row * GRID + GRID/2;
+    ctx.beginPath();
+    ctx.moveTo(-frame * 2 % 50, y);
+    ctx.lineTo(W + 50, y);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  
+  // Road edge lines
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(0, (ROAD_START + 1) * GRID);
+  ctx.lineTo(W, (ROAD_START + 1) * GRID);
+  ctx.moveTo(0, (ROAD_END + 1) * GRID);
+  ctx.lineTo(W, (ROAD_END + 1) * GRID);
+  ctx.stroke();
+  
+  // Bottom grass
+  ctx.fillStyle = COLORS.grass[0];
+  ctx.fillRect(0, (ROAD_END + 2) * GRID, W, H - (ROAD_END + 2) * GRID);
+  
+  // Flowers bottom
+  flowers.filter(f => f.y > (ROAD_END + 1) * GRID).forEach(f => drawFlower(f));
+  
+  // Trees bottom
+  trees.filter(t => t.y > (ROAD_END + 1) * GRID).forEach(t => drawTree(t));
+}
+
+function drawTree(t) {
+  const px = t.x;
+  const py = t.y;
+  ctx.save();
+  ctx.translate(px, py);
+  ctx.scale(t.scale, t.scale);
+  
+  // Trunk
+  ctx.fillStyle = COLORS.treeTrunk;
+  ctx.fillRect(-6, 0, 12, 40);
+  // Bark lines
+  ctx.strokeStyle = '#6B4423';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 3; i++) {
+    ctx.beginPath();
+    ctx.moveTo(-6 + i*6, 0);
+    ctx.lineTo(-6 + i*6 + 3, 40);
+    ctx.stroke();
+  }
+  
+  // Leaves (3 layers)
+  ctx.fillStyle = t.leafColor;
+  [0, -15, -30].forEach((ly, i) => {
+    ctx.beginPath();
+    ctx.ellipse(0, ly, 28 - i*4, 20 - i*3, 0, 0, Math.PI*2);
+    ctx.fill();
+  });
+  ctx.restore();
+}
+
+function drawFlower(f) {
+  const sway = Math.sin(frame * 0.05 + f.sway) * 3;
+  ctx.save();
+  ctx.translate(f.x + sway, f.y);
+  ctx.scale(f.scale, f.scale);
+  
+  // Stem
+  ctx.strokeStyle = '#4E9F3D';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(0, 15);
+  ctx.stroke();
+  
+  // Leaf
+  ctx.fillStyle = '#4E9F3D';
+  ctx.beginPath();
+  ctx.ellipse(-3, 8, 5, 10, -0.5, 0, Math.PI*2);
+  ctx.fill();
+  
+  // Petals
+  ctx.fillStyle = COLORS.flower[f.type];
+  for (let i = 0; i < 5; i++) {
+    const angle = (i / 5) * Math.PI * 2;
+    ctx.save();
+    ctx.rotate(angle);
+    ctx.beginPath();
+    ctx.ellipse(0, -10, 6, 10, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+  // Center
+  ctx.fillStyle = '#FFD93D';
+  ctx.beginPath();
+  ctx.arc(0, 0, 5, 0, Math.PI*2);
+  ctx.fill();
+  
+  ctx.restore();
+}
+
+function drawCars() {
+  cars.forEach(c => c.draw());
+}
+
+function drawScorePopup() {
+  if (score > highScoreThisRun) {
+    ctx.save();
+    ctx.font = 'bold 24px Comic Sans MS';
+    ctx.fillStyle = '#FF6B9D';
+    ctx.textAlign = 'center';
+    ctx.fillText('🎉 새 기록!', W/2, 60);
+    ctx.restore();
+  }
+}
+
+function update() {
+  if (gameOver || won) return;
+  
+  frame++;
+  
+  // Rabbit hop animation
+  if (rabbit.hopping > 0) {
+    rabbit.hopping -= 0.1;
+    if (rabbit.hopping <= 0) {
+      rabbit.hopping = 0;
+      rabbit.x = rabbit.targetX;
+      rabbit.y = rabbit.targetY;
+    }
+  }
+  
+  // Spawn cars
+  spawnCars();
+  
+  // Update cars
+  for (let i = cars.length - 1; i >= 0; i--) {
+    cars[i].update();
+    if (cars[i].offScreen()) cars.splice(i, 1);
+  }
+  
+  // Check win (reached top)
+  if (rabbit.y <= 0) {
+    won = true;
+    score += 100;
+    if (score > best) {
+      best = score;
+      localStorage.setItem('rabbitCrossBest', best.toString());
+      bestEl.textContent = best;
+    }
+    scoreEl.textContent = score;
+    msgTitle.textContent = '도착! 🎉';
+    msgText.textContent = `점수: ${score}점`;
+    msg.classList.add('show');
+    createParticles(W/2, H/2, '#FFD93D', 30);
+    createParticles(W/2, H/2, '#FF6B9D', 20);
+    createParticles(W/2, H/2, '#6BCB77', 20);
+    return;
+  }
+  
+  // Update score based on highest row reached
+  const rowScore = (ROWS - 1 - rabbit.y) * 10;
+  if (rowScore > score) {
+    score = rowScore;
+    scoreEl.textContent = score;
+  }
+  
+  // High score this run
+  if (score > highScoreThisRun) highScoreThisRun = score;
+  
+  // Update particles
+  updateParticles();
+  
+  // Screen shake decay
+  if (screenShake > 0) screenShake *= 0.9;
+}
+
+function draw() {
+  // Screen shake
+  if (screenShake > 0.5) {
+    ctx.save();
+    ctx.translate((Math.random()-0.5)*screenShake, (Math.random()-0.5)*screenShake);
+  }
+  
+  drawBackground();
+  drawCars();
+  drawRabbit();
+  drawParticles();
+  drawScorePopup();
+  
+  if (screenShake > 0.5) ctx.restore();
+}
+
+function gameLoop() {
+  update();
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+// Input handling
+const keys = {};
+window.addEventListener('keydown', e => {
+  keys[e.key] = true;
+  if (!gameOver && !won && !rabbit.hopping) {
+    let dx = 0, dy = 0;
+    if (e.key === 'ArrowUp' || e.key === 'w') dy = -1;
+    else if (e.key === 'ArrowDown' || e.key === 's') dy = 1;
+    else if (e.key === 'ArrowLeft' || e.key === 'a') dx = -1;
+    else if (e.key === 'ArrowRight' || e.key === 'd') dx = 1;
+    
+    if (dx !== 0 || dy !== 0) {
+      const nx = Math.max(0, Math.min(COLS-1, rabbit.x + dx));
+      const ny = Math.max(0, Math.min(ROWS-1, rabbit.y + dy));
+      if (nx !== rabbit.x || ny !== rabbit.y) {
+        rabbit.targetX = nx;
+        rabbit.targetY = ny;
+        rabbit.hopping = 1;
+        rabbit.hopDir = dx;
+        // Small hop sound effect via web audio
+        playHop();
+      }
+    }
+  }
+  if ((gameOver || won) && e.key === ' ') restart();
+});
+window.addEventListener('keyup', e => keys[e.key] = false);
+
+function playHop() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = 'sine';
+    osc.frequency.value = 600;
+    gain.gain.setValueAtTime(0.1, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.1);
+  } catch(e) {}
+}
+
+function restart() {
+  rabbit = { x: 5, y: 15, targetX: 5, targetY: 15, hopping: 0, hopDir: 0 };
+  cars = [];
+  score = 0;
+  highScoreThisRun = 0;
+  gameOver = false;
+  won = false;
+  frame = 0;
+  particles = [];
+  screenShake = 0;
+  scoreEl.textContent = '0';
+  msg.classList.remove('show');
+  initDecorations();
+  // Spawn initial cars
+  for (let row = ROAD_START; row <= ROAD_END; row++) {
+    if (row === REST_AREA_ROW) continue; // Skip rest area
+    for (let i = 0; i < 2; i++) {
+      const dir = Math.random() > 0.5 ? 1 : -1;
+      const car = new Car(row, dir);
+      car.x = dir === 1 ? Math.random() * COLS : Math.random() * COLS;
+      cars.push(car);
+    }
+  }
+}
+
+restartBtn.addEventListener('click', restart);
+
+// Touch controls for mobile
+let touchStart = null;
+canvas.addEventListener('touchstart', e => {
+  touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+}, { passive: true });
+canvas.addEventListener('touchend', e => {
+  if (!touchStart) return;
+  const dx = e.changedTouches[0].clientX - touchStart.x;
+  const dy = e.changedTouches[0].clientY - touchStart.y;
+  touchStart = null;
+  if (Math.abs(dx) > Math.abs(dy)) {
+    if (dx > 30) simulateKey('ArrowRight');
+    else if (dx < -30) simulateKey('ArrowLeft');
+  } else {
+    if (dy > 30) simulateKey('ArrowDown');
+    else if (dy < -30) simulateKey('ArrowUp');
+  }
+}, { passive: true });
+
+function simulateKey(key) {
+  if (!gameOver && !won && !rabbit.hopping) {
+    let dx = 0, dy = 0;
+    if (key === 'ArrowUp') dy = -1;
+    else if (key === 'ArrowDown') dy = 1;
+    else if (key === 'ArrowLeft') dx = -1;
+    else if (key === 'ArrowRight') dx = 1;
+    if (dx !== 0 || dy !== 0) {
+      const nx = Math.max(0, Math.min(COLS-1, rabbit.x + dx));
+      const ny = Math.max(0, Math.min(ROWS-1, rabbit.y + dy));
+      if (nx !== rabbit.x || ny !== rabbit.y) {
+        rabbit.targetX = nx;
+        rabbit.targetY = ny;
+        rabbit.hopping = 1;
+        rabbit.hopDir = dx;
+        playHop();
+      }
+    }
+  }
+  if ((gameOver || won) && key === ' ') restart();
+}
+
+// Round rect helper
+CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+  if (w < 2 * r) r = w / 2;
+  if (h < 2 * r) r = h / 2;
+  this.beginPath();
+  this.moveTo(x + r, y);
+  this.arcTo(x + w, y, x + w, y + h, r);
+  this.arcTo(x + w, y + h, x, y + h, r);
+  this.arcTo(x, y + h, x, y, r);
+  this.arcTo(x, y, x + w, y, r);
+  this.closePath();
+  return this;
+};
+
+// Initialize and start game loop
+restart();
+gameLoop();
+</script>
+</body>
+</html>
